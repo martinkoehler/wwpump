@@ -1,4 +1,20 @@
-import micropython
+# 
+# This file is part of the wwwpump distribution
+# Copyright (c) 2022 Martin Köhler.
+# 
+# This program is free software: you can redistribute it and/or modify  
+# it under the terms of the GNU General Public License as published by  
+# the Free Software Foundation, version 3.
+#
+# This program is distributed in the hope that it will be useful, but 
+# WITHOUT ANY WARRANTY; without even the implied warranty of 
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU 
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License 
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+mport micropython
 import sys
 import io
 import time, onewire, ds18x20
@@ -25,8 +41,9 @@ TIMETABLE_FILENAME = "timetable"
 
 # Pumpe
 PUMPEN_PIN = 20
-WAITING_TIME = 30*60*1000 # 30*60*1000 # Pumpe soll nur alle 30 Minuten laufen
-RUNNING_TIME = 30*1000 # Pumpe laeuft für 30 Sekunden
+WAITING_TIME = 30*60*1000 # 30*60*1000 # Pump should only run every 30 minutes
+QUIET_TIME = WAITING_TIME/6 # If we get a request after 5 minutes, increase the slot counter
+RUNNING_TIME = 30*1000 # Pump runs for 30 seconds
 
 # USR Button
 USR_PIN = 13
@@ -202,6 +219,7 @@ class Timetable(Singleton):
     
     def __init__(self):
         self.read_fromdisk() # If we have a timetable on disk, read it
+        alarm_timer.schedule_next_alert(self) # Make sure that we initialize after reading the data from disk
 
     def check_item(self, t=time.time(), increase = True):
         """
@@ -366,32 +384,47 @@ class Pumpe(Singleton):
         self.pumpenpin.on() # Low -> Pumpe ein
         self.pumpe_laeuft = False
         self.rgb_led.set(RGB_led.off)
-        self.timer_pumpenlaufzeit = 0 # timer_pumpenlaufzeit: steuert Laufzeit der Pumpe
-        self.timer_pause = 0 # timer_pause steuert die Größe der Pause zwischen den Laufzeiten
+        self.timer_pumpenlaufzeit = 0 # timer_pumpenlaufzeit: running time of the pump
+        self.timer_pause = 0 # timer_pause: gap between successive pump runs
+        self.timer_quiet = 0 # timer_quiet: ignore request in quiet time 
 
     def laeuft(self, pumpe_soll_laufen):
-        waiting_time = WAITING_TIME # Pumpe will only run again after WAITING_TIME seconds
-        running_time = RUNNING_TIME # Pumpe runs for RUNNING_TIME seconds
+        """
+        What shall the pump do?
+        If it should run (True) than we check whether this request was given outside the waiting time, in which case
+        the pump will start and we return true.
+        If we are within the first 1/6 th of the waiting time, we return false
+        If within the waiting time but outside first 1/6, we do not start the pump, but return true
+        If we the pump should not run (False), we check whether the running time has elaped and stop the pump
+        in that case. We always return False.
+        """
+        waiting_time = WAITING_TIME # Pump will only run again after WAITING_TIME seconds
+        quiet_time = QUIET_TIME     # a request will be ignored if it occurs within the quiet_time
+        running_time = RUNNING_TIME # Pump runs for RUNNING_TIME seconds
         if (time.ticks_ms() - self.timer_pause) > waiting_time:
             self.rgb_led.set(RGB_led.off)
         else:
             self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
         if (pumpe_soll_laufen == True and \
-            self.pumpe_laeuft == False and \
-            (time.ticks_ms() - self.timer_pause) > waiting_time ): # Pump will only run outside wating_time (30min) 
-            self.pumpe_laeuft = True                               
-            self.pumpenpin.off()
-            info(f"{pt()}: Pump on")
-            self.timer_pumpenlaufzeit = time.ticks_ms()
-            self.timer_pause = time.ticks_ms()
-            return True
-        if (pumpe_soll_laufen == False and \
-            self.pumpe_laeuft == True and \
-            (time.ticks_ms() - self.timer_pumpenlaufzeit) > running_time): # Pump will run for running_time (30s)
+                self.pumpe_laeuft == False):
+            if (time.ticks_ms() - self.timer_pause) > waiting_time ): # Pump will only run outside wating_time (30min) 
+                self.pumpe_laeuft = True
+                self.pumpenpin.off()
+                info(f"{pt()}: Pump on")
+                self.timer_pumpenlaufzeit = time.ticks_ms()
+                self.timer_pause = time.ticks_ms()
+                self.time_quiet = time_ticks_ms()
+                retrun True
+            elif (time.ticks_ms() - self.timer_quiet) > quiet_time):
+                self.timer_quiet = time.ticks_ms()
+                return True # indicates that we are inside waiting time but outside repeated buffer
+        elif (pumpe_soll_laufen == False and \
+              self.pumpe_laeuft == True and \
+              (time.ticks_ms() - self.timer_pumpenlaufzeit) > running_time): # Pump will run for running_time (30s)
             self.pumpe_laeuft = False
             self.pumpenpin.on()
             info(f"{pt()}: Pump off")
-        return False 
+        return False # request False or trigger ignored
 
     def tick(self, args=None):
         """
@@ -400,10 +433,10 @@ class Pumpe(Singleton):
         """
         self.led_onboard.blink(ms=10) # Heartbeat
         if self.temp.rising():
-            if (self.laeuft(True) == True):       # wenn binnen 5 Sekunden > = 0.12°C gestiegen ist, Pumpe an!
-                self.timetable.check_item()
+            if (self.laeuft(True) == True):       # if within 5s the temp > = 0.12°C, request pump on
+                self.timetable.check_item()       # Mark this in the timetable, except when within 1/6th of waiting time
         else:
-            self.laeuft(False)
+            self.laeuft(False)                    # request pump off
     
     def scheduled_run(self, args=None):
         """
@@ -469,3 +502,4 @@ pumpe = Pumpe()
 backup = Backup(pumpe, stream)
 # Start processes
 pumpe.alarm_timer.init_timers(pumpe)
+
