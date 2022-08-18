@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License 
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-mport micropython
+import micropython
 import sys
 import io
 import time, onewire, ds18x20
@@ -36,13 +36,13 @@ DS18B20_PIN = 22
 DS18B20_INDEX = 0 # Only one sensor
 
 # Timetable
-SLOT_TIME = 15 * 60 # (in sec) slots are 30 minutes
+SLOT_TIME = 60 * 60 # (in sec) slots are 60 minutes
 TIMETABLE_FILENAME = "timetable"
 
 # Pumpe
 PUMPEN_PIN = 20
-WAITING_TIME = 30*60*1000 # 30*60*1000 # Pump should only run every 30 minutes
-QUIET_TIME = WAITING_TIME/6 # If we get a request after 5 minutes, increase the slot counter
+WAITING_TIME = 60*60*1000 # Pump should only run every 60 minutes
+QUIET_TIME = WAITING_TIME/20 # If we get a request after 3 minutes, increase the slot counter
 RUNNING_TIME = 30*1000 # Pump runs for 30 seconds
 
 # USR Button
@@ -219,7 +219,7 @@ class Timetable(Singleton):
     
     def __init__(self):
         self.read_fromdisk() # If we have a timetable on disk, read it
-        alarm_timer.schedule_next_alert(self) # Make sure that we initialize after reading the data from disk
+        self.alarm_timer.schedule_next_alarm(self) # Make sure that we initialize after reading the data from disk
 
     def check_item(self, t=time.time(), increase = True):
         """
@@ -277,9 +277,11 @@ class Timetable(Singleton):
         """
         if len(self.timetable) < 1:
             debug("No data in timetable to write")
-        return
+            return False
         with open(name, "w") as f:
-            f.write(str(self.timetable))
+            o=f.write(str(self.timetable))
+            debug(f"{o} Bytes written to {name}")
+            return True
             
     def read_fromdisk(self, name=TIMETABLE_FILENAME):
         """
@@ -287,11 +289,14 @@ class Timetable(Singleton):
         """
         try:
             with open(name,"r") as f:
-                t_table = f.read()
+                o = t_table = f.read()
+                debug(f"{o} Bytes read from {name}")
             self.timetable = eval(t_table)
+            info(f"{len(self.timetable)} entries read from {name}")
         except OSError:
             debug(f"{pt(time.time())}: No file {name} found.")
-                
+            return False
+        return True
         
     def _add_slot(self, t):
         """
@@ -407,15 +412,15 @@ class Pumpe(Singleton):
             self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
-            if (time.ticks_ms() - self.timer_pause) > waiting_time ): # Pump will only run outside wating_time (30min) 
+            if ((time.ticks_ms() - self.timer_pause) > waiting_time): # Pump will only run outside wating_time (30min) 
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{pt()}: Pump on")
                 self.timer_pumpenlaufzeit = time.ticks_ms()
                 self.timer_pause = time.ticks_ms()
-                self.time_quiet = time_ticks_ms()
-                retrun True
-            elif (time.ticks_ms() - self.timer_quiet) > quiet_time):
+                self.time_quiet = time.ticks_ms()
+                return True
+            elif ((time.ticks_ms() - self.timer_quiet) > quiet_time):
                 self.timer_quiet = time.ticks_ms()
                 return True # indicates that we are inside waiting time but outside repeated buffer
         elif (pumpe_soll_laufen == False and \
@@ -479,22 +484,26 @@ class Backup():
         else:
             debug(f"{pt()}: Button pressed: {p}")
             RGB_led().blink(RGB_led.white)
-            self.pumpe.timetable.write_todisk()
+            if self.pumpe.timetable.write_todisk():
+                info("Timetable stored on disk")
+                RGB_led().blink(RGB_led.green)
             # TO DO Store stream
             if self.stream != sys.stdout:
                 # Assume it is a StringIO
                 msgs = stream.getvalue()
                 if msgs:
                     with open(LOG_FILENAME,"a") as f:
-                        f.write(msgs)
+                        o=f.write(msgs)
+                        debug(f"{o} Bytes written to {LOG_FILENAME}")
+                        RGB_led().blink(RGB_led.green, num=2)
             self.timestamp = now
-            RGB_led().blink(RGB_led.white, num=2)
+            
 
 
 # Logger
 stream = sys.stdout
-stream = io.StringIO()
-#ulogging.basicConfig(level=ulogging.DEBUG,stream=sys.stdout)
+#stream = io.StringIO()
+#ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
 ulogging.basicConfig(stream=stream) # INFO
 
 pumpe = Pumpe()
