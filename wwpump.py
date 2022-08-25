@@ -133,6 +133,9 @@ class Alarm_timer(Singleton):
     timer3 = Timer()
     def init_timers(self, pumpe):
         self.pumpe=pumpe
+        self.pumpe_tick_ref=pumpe.tick
+        self.pumpe_desinfect_ref=pumpe.desinfect
+        self.pumpe_scheduled_run_ref = pumpe.scheduled_run
         self.timer1= Timer(period=1000, mode=Timer.PERIODIC, callback=self._cb1) # Worker
         self.timer2=Timer(period=3*24*60*60*1000, mode=Timer.PERIODIC, callback=self._cb2) # Alle 3 Tage
     
@@ -156,12 +159,14 @@ class Alarm_timer(Singleton):
 
     # These call backs are interrupt driven, hence complicated functions are not allowed
     # We use micropython.schedule to start the "real" worker
+    # We war not allowed to allocate memory in the ISR See
+    # https://docs.micropython.org/en/latest/reference/isr_rules.html#isr-rulese
     def _cb1(self, tim):
-        micropython.schedule(self.pumpe.tick, tim)
+        micropython.schedule(self.pumpe_tick_ref, tim)
     def _cb2(self, tim):
-        micropython.schedule(self.pumpe.desinfect, tim)
+        micropython.schedule(self.pumpe_desinfect_ref, tim)
     def _cb3(self, tim):
-        micropython.schedule(self.pumpe.scheduled_run, tim)
+        micropython.schedule(self.pumpe_scheduled_run_ref, tim)
     
 
 class Temp(Singleton):
