@@ -226,12 +226,14 @@ class Timetable(Singleton):
         self.read_fromdisk() # If we have a timetable on disk, read it
         self.alarm_timer.schedule_next_alarm(self) # Make sure that we initialize after reading the data from disk
 
-    def check_item(self, t=time.time(), increase = True):
+    def check_item(self, t = None, increase = True):
         """
         If we get a new item, we search whether this falls in an already existing slot
         in this case increment the counter in the timetable
         If not add the item as new slot
         """
+        if t == None:
+            t = time.time()
         index = self._in_timetable(t)
         if index == None:
             # Element new!
@@ -259,11 +261,13 @@ class Timetable(Singleton):
                 self.rgb_led.blink(RGB_led.blue, num=2)
                 
             
-    def next_alarm(self,t=time.time()):
+    def next_alarm(self,t = None):
         """
         Returns next alarm time in ms
         or False if no entry in the timetable
         """
+        if t == None:
+            t = time.time()
         week = 7 * 24 * 60 * 60 # One week in secons
         if len(self.timetable) < 1:
             return False
@@ -324,14 +328,14 @@ class Timetable(Singleton):
             except AttributeError:
                 debug(f"{pt()}: Can not reschedule alarm without a 'pumpe' object")
     
-    def _format_slot(self,slot):
+    def _format_slot(self, slot):
         """
         Human readable form of a slot
         """
         days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
         return f"'{days[slot[0]]}: {slot[1]:02}:{slot[2]:02}:{slot[3]:02} Counter:{slot[4]}'"
             
-    def _to_base_time(self,lst):
+    def _to_base_time(self, lst):
         """
         converts a list [h,m,s,wd] to base in 1970 to ensure that we can substract
         """
@@ -469,14 +473,14 @@ class Backup():
     timestamp = 0.0
 
     def __init__(self, pumpe, stream):
-        #self.timestamp = utime.ticks_ms()
+        self.do_backup_ref = self.do_backup
         button = Pin(USR_PIN, Pin.IN)
         button.irq(trigger=Pin.IRQ_FALLING, handler=self._cb1)
         self.pumpe = pumpe
         self.stream = stream
         
-    def _cb1(self, p):
-        micropython.schedule(self.do_backup, p)
+    def _cb1(self, p = None):
+        micropython.schedule(self.do_backup_ref, p)
         
     def do_backup(self, p = None):
         """
