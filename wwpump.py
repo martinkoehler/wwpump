@@ -53,10 +53,12 @@ LOG_FILENAME = "wwpumpe.log"
 
 # Helper functions
 # ======================================
-def pt(t = time.time()):
+def pt(t = None):
     """
     Format a time integer in human readable form (pt for Pretty format Time)
     """
+    if t == None:
+        t = time.time()
     y, mm, d, h, m, s = time.localtime(t)[0:6]
     return f"{d:02d}.{mm:02d}.{y} {h:02d}:{m:02d}:{s:02d}"
 
@@ -415,26 +417,25 @@ class Pumpe(Singleton):
         waiting_time = WAITING_TIME # Pump will only run again after WAITING_TIME seconds
         quiet_time = QUIET_TIME     # a request will be ignored if it occurs within the quiet_time
         running_time = RUNNING_TIME # Pump runs for RUNNING_TIME seconds
-        if (time.ticks_ms() - self.timer_pause) > waiting_time:
+        now_ms = time.ticks_ms()
+        if (now_ms - self.timer_pause) > waiting_time:
             self.rgb_led.set(RGB_led.off)
         else:
             self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
-            if ((time.ticks_ms() - self.timer_pause) > waiting_time): # Pump will only run outside wating_time (30min) 
+            if ((now_ms - self.timer_pause) > waiting_time): # Pump will only run outside wating_time (30min) 
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{pt()}: Pump on")
-                self.timer_pumpenlaufzeit = time.ticks_ms()
-                self.timer_pause = time.ticks_ms()
-                self.time_quiet = time.ticks_ms()
+                self.timer_pumpenlaufzeit = self.timer_pause = self.timer_quiet = now_ms
                 return True
-            elif ((time.ticks_ms() - self.timer_quiet) > quiet_time):
-                self.timer_quiet = time.ticks_ms()
+            elif ((now_ms - self.timer_quiet) > quiet_time):
+                self.timer_quiet = now_ms
                 return True # indicates that we are inside waiting time but outside repeated buffer
         elif (pumpe_soll_laufen == False and \
               self.pumpe_laeuft == True and \
-              (time.ticks_ms() - self.timer_pumpenlaufzeit) > running_time): # Pump will run for running_time (30s)
+              (now_ms - self.timer_pumpenlaufzeit) > running_time): # Pump will run for running_time (30s)
             self.pumpe_laeuft = False
             self.pumpenpin.on()
             info(f"{pt()}: Pump off")
@@ -457,7 +458,8 @@ class Pumpe(Singleton):
         Starte pumpe gemäß timetable
         """
         # Decrease the counter in the timetable
-        self.timetable.check_item(increase=False)
+        self.timetable.check_item(t=time.time() + 10, increase=False) # Add 10s to make sure
+                                                                      # we are in the slot
         self.laeuft(True)
         self.alarm_timer.schedule_next_alarm(self.timetable)     
    
@@ -470,7 +472,7 @@ class Pumpe(Singleton):
         self.timetable.write_todisk()
 
 class Backup():
-    timestamp = 0.0
+    timestamp_ms = 0
 
     def __init__(self, pumpe, stream):
         self.do_backup_ref = self.do_backup
@@ -486,8 +488,8 @@ class Backup():
         """
         Trigger a backup when USR Button is pressed
         """
-        now = utime.ticks_ms()
-        if now - self.timestamp < 2000:
+        now_ms = time.ticks_ms()
+        if now_ms - self.timestamp_ms < 2000:
             pass
             #debug (f"{pt()}: Ignoring")
         else:
@@ -505,7 +507,7 @@ class Backup():
                         o=f.write(msgs)
                         debug(f"{o} Bytes written to {LOG_FILENAME}")
                         RGB_led().blink(RGB_led.green, num=2)
-            self.timestamp = now
+            self.timestamp_ms = now_ms
             
 
 
@@ -520,4 +522,3 @@ pumpe = Pumpe()
 backup = Backup(pumpe, stream)
 # Start processes
 pumpe.alarm_timer.init_timers(pumpe)
-
