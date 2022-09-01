@@ -134,6 +134,7 @@ class Alarm_timer(Singleton):
     rgb_led = RGB_led()
     timer3 = Timer()
     def init_timers(self, pumpe):
+        self.init_time = time.time()
         self.pumpe=pumpe
         self.pumpe_tick_ref=pumpe.tick
         self.pumpe_desinfect_ref=pumpe.desinfect
@@ -148,8 +149,9 @@ class Alarm_timer(Singleton):
         self.timer3.deinit() # Just to be on the safe side
         self.timer3 = Timer(period=alrm*1000, mode=Timer.ONE_SHOT, callback=self._cb3) # need ms here
         self.rgb_led.blink(RGB_led.green, num=2)
-        info(f"{pt()}: Next scheduled_run at: {pt(time.time()+alrm)}")
-    
+        self.timer3_time = time.time()+alrm # Store this in the class
+        info(f"{pt()}: Next scheduled_run at: {pt(self.timer3_time)}")
+     
     # For debugging
     def set_pumpe(pumpe):
         self.pumpe=pumpe
@@ -514,8 +516,8 @@ class Backup():
 # Logger
 stream = sys.stdout
 #stream = io.StringIO()
-#ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
-ulogging.basicConfig(stream=stream) # INFO
+ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
+#ulogging.basicConfig(stream=stream) # INFO
 
 pumpe = Pumpe()
 # Prepare for backup via USR button
