@@ -426,7 +426,8 @@ class Pumpe(Singleton):
             self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
-            if ((now_ms - self.timer_pause) > waiting_time): # Pump will only run outside wating_time (30min) 
+            if ((now_ms - self.timer_pause) > waiting_time or
+                 self.timer_pause > now_ms): # Pump will only run outside wating_time (30min) 
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{pt()}: Pump on")
