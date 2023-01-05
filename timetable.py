@@ -1,28 +1,25 @@
-# 
+#
 # This file is part of the wwpump distribution
 # Copyright (c) 2022 Martin Köhler.
-# 
-# This program is free software: you can redistribute it and/or modify  
-# it under the terms of the GNU General Public License as published by  
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, version 3.
 #
-# This program is distributed in the hope that it will be useful, but 
-# WITHOUT ANY WARRANTY; without even the implied warranty of 
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU 
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 # General Public License for more details.
 #
-# You should have received a copy of the GNU General Public License 
+# You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-
 # Timetable
 SLOT_TIME = 15 # (in min) slots are 15 minutes (Slots must divide the hour!)
 TIMETABLE_FILENAME = "timetable"
-
 from ulogging import info, debug
 import time
 from my_time import my_time
-
 # Helper functions
 # ======================================
 def pt(t = None):
@@ -33,7 +30,6 @@ def pt(t = None):
         t = my_time()
     y, mm, d, h, m, s = time.localtime(t)[0:6]
     return f"{d:02d}.{mm:02d}.{y} {h:02d}:{m:02d}:{s:02d}"
-
 class Timetable():
     """
     Implements a timetable to store the slots where we turn the pump on
@@ -42,10 +38,8 @@ class Timetable():
     # which ensures that entries are deleted if not used
     timetable = [] # Leere Tabelle
     slot_time = SLOT_TIME
-
     def __init__(self):
         self.read_fromdisk() # If we have a timetable on disk, read it
-
     def check_item(self, t = None, increase = True):
         """
         If we get a new item, we search whether this falls in an already existing slot
@@ -67,8 +61,7 @@ class Timetable():
             info(f"{pt()}: Slot found. Counter decreased {self._format_slot(self.timetable[index])}")
             if self.timetable[index][4] < 1:
                 self.timetable.pop(index)
-                info("Entry removed")
-            
+                debug("Entry removed")
     def next_alarm(self,t = None):
         """
         Returns next alarm time in s from t (or my_time() == now)
@@ -87,19 +80,17 @@ class Timetable():
             return slot_base_time + week - base_time
         else:
             return slot_base_time - base_time
-       
     def write_todisk(self, name=TIMETABLE_FILENAME):
         """
         store the timetable on disk
         """
         if len(self.timetable) < 1:
-            info("No data in timetable to write")
+            debug("No data in timetable to write")
             return False
         with open(name, "w") as f:
             o=f.write(str(self.timetable))
-            info(f"{o} Bytes written to {name}")
+            debug(f"{o} Bytes written to {name}")
             return True
-            
     def read_fromdisk(self, name=TIMETABLE_FILENAME):
         """
         Reads a timetable from disk and initializes the local variable
@@ -111,14 +102,13 @@ class Timetable():
             self.timetable = eval(t_table)
             info(f"{len(self.timetable)} entries read from {name}")
         except OSError:
-            info(f"{pt(my_time())}: No file {name} found.")
+            debug(f"{pt()}: No file {name} found.")
             return False
         return True
-        
     def _add_slot(self, t):
         """
         Add an item to the timetable and sort the table
-        Return True in case less than two entries remain 
+        Return True in case less than two entries remain
         """
         h, m, s, wd = time.localtime(t)[3:7]
         # Force Slots
@@ -132,17 +122,15 @@ class Timetable():
         # Sort the table using all entries 0 padded
         self.timetable.sort(key=lambda elem: "".join([f"{i:02}" for i in elem]))
         if len(self.timetable) < 2:
-            # Probably need to schedule next alarm 
+            # Probably need to schedule next alarm
             return True
         return False
-        
     def _format_slot(self, slot):
         """
         Human readable form of a slot
         """
         days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
         return f"'{days[slot[0]]}: {slot[1]:02}:{slot[2]:02}:{slot[3]:02} Counter:{slot[4]}'"
-            
     def _to_base_time(self, lst):
         """
         converts a list [h,m,s,wd] to base in 1970 to ensure that we can substract
@@ -152,8 +140,6 @@ class Timetable():
         #print(base_date)
         base_time = time.mktime(base_date)
         return base_time
-        
-        
     def _next_slot(self, t):
         """
         Find the next slot for a given time t
@@ -173,8 +159,6 @@ class Timetable():
         if len(timetable_str) > 0:
             return 0 # First element
         return False
-    
- 
     def _in_timetable(self, t):
         """
         Check wether time is in the timetable
@@ -183,7 +167,7 @@ class Timetable():
         local_base_time = self._to_base_time(time.localtime(t)[3:7])
         for i in range(0,len(self.timetable)):
             wday, hour, min, sec = self.timetable[i][0:-1]
-            base_time = self._to_base_time([hour,min,sec,wday]) 
+            base_time = self._to_base_time([hour,min,sec,wday])
             max_time = base_time + self.slot_time * 60
             min_time = base_time
             if min_time <= local_base_time <= max_time:

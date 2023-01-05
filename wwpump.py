@@ -1,17 +1,17 @@
-# 
+#
 # This file is part of the wwpump distribution
 # Copyright (c) 2022 Martin Köhler.
-# 
-# This program is free software: you can redistribute it and/or modify  
-# it under the terms of the GNU General Public License as published by  
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, version 3.
 #
-# This program is distributed in the hope that it will be useful, but 
-# WITHOUT ANY WARRANTY; without even the implied warranty of 
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU 
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 # General Public License for more details.
 #
-# You should have received a copy of the GNU General Public License 
+# You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 import micropython, onewire, ds18x20
@@ -23,41 +23,40 @@ from machine import Pin
 from led import Led, RGB_led, Singleton
 from ulogging import info, debug
 from my_time import my_time
-
-
 # DS18B20
 DS18B20_PIN = 22
 DS18B20_INDEX = 0 # Only one sensor
-
 # Pumpe
 PUMPEN_PIN = 20
-
+# Heartbeat (ms)
+TICK_TIME = 1000 # Main routine
 # All thess times are in s
 WAITING_TIME = 15*60 # Pump should only run every 15 minutes
 RUNNING_TIME = 40 # Pump runs for 40 seconds
-
+HOLIDAY_TIME = 24 * 60 * 60 # Holiday mode if no request for 24h
+DESINFECT_TIME = 3*24*60*60 # Run pump at least every 3 days & do Backup
 # USR Button
 USR_PIN = 13
-
 # Backup
 LOG_FILENAME = "wwpumpe.log"
-
 class Alarm_timer(Singleton):
     timer3 = Timer()
     def __init__(self):
         self.pumpe=Pumpe()
-        self.ttable = timetable.Timetable() 
+        self.ttable = timetable.Timetable()
         self.pumpe_tick_ref=pumpe.tick
-        self.pumpe_desinfect_ref=pumpe.desinfect
+        self.pumpe_desinfect_ref=self.pumpe_desinfect
         self.pumpe_scheduled_run_ref = self.pumpe_scheduled_run
-        self.timer1= Timer(period=1000, mode=Timer.PERIODIC, callback=self._cb1) # Worker
-        self.timer2=Timer(period=3*24*60*60*1000, mode=Timer.PERIODIC, callback=self._cb2) # Alle 3 Tage
-    
-    def schedule_next_alarm(self, timetable):       
-        alrm = timetable.next_alarm() # This is in seconds
+        self.timer1= Timer(period=TICK_TIME, mode=Timer.PERIODIC, callback=self._cb1) # Worker
+        self.timer2=Timer(period= DESINFECT_TIME * 1000, mode=Timer.PERIODIC, callback=self._cb2) # Alle 3 Tage
+        # Make sure we initialize the alarm scheduler (timer3)
+        self.schedule_next_alarm(self.ttable)
+    def schedule_next_alarm(self, ttable):
+        alrm = ttable.next_alarm() # This is in seconds
         self.timer3.deinit() # Just to be on the safe side
         if alrm == False:
             info("No next alarm scheduled")
+            self.timer3_time = False
             return
         # Start one minute earlier
         if alrm > 60:
@@ -66,20 +65,23 @@ class Alarm_timer(Singleton):
         self.timer3 = Timer(period=alrm*1000, mode=Timer.ONE_SHOT, callback=self._cb3) # need ms here
         self.timer3_time = my_time()+alrm # Store this in the class
         info(f"{timetable.pt()}: Next scheduled_run at: {timetable.pt(self.timer3_time)}")
-    
-    def pumpe_scheduled_run(self):
+    def pumpe_scheduled_run(self, args=None):
         self.pumpe.scheduled_run()
-        self.schedule_next_alarm(self.ttable)   
-     
+        self.schedule_next_alarm(self.ttable)
+    def pumpe_desinfect(self, args=None):
+        # If we do not have a next alarm scheduled, check whether there is a new
+        # entry in the timetable
+        if not self.timer3_time:
+            self.schedule_next_alarm(self.ttable)
+        # Start the desinfect run
+        self.pumpe.desinfect()
     # For debugging
     def set_pumpe(self, pumpe):
         self.pumpe=pumpe
-
     def stop(self):
         self.timer1.deinit()
         self.timer2.deinit()
         self.timer3.deinit()
-
     # These call backs are interrupt driven, hence complicated functions are not allowed
     # We use micropython.schedule to start the "real" worker
     # We are not allowed to allocate memory in the ISR See
@@ -90,8 +92,6 @@ class Alarm_timer(Singleton):
         micropython.schedule(self.pumpe_desinfect_ref, tim)
     def _cb3(self, tim):
         micropython.schedule(self.pumpe_scheduled_run_ref, tim)
-    
-
 class Temp(Singleton):
     """
     Temperature class:
@@ -99,7 +99,6 @@ class Temp(Singleton):
     """
     cnt = 0
     led_onboard = Led() # On board led
-    
     def __init__(self):
         try:
             ow = onewire.OneWire(Pin(DS18B20_PIN)) # create a OneWire bus on GPIO22
@@ -119,7 +118,6 @@ class Temp(Singleton):
             self.ds = ds()
         temp_now = self._get_temperature()
         self.t = [temp_now] * 5 # Initialize history
-
     def rising(self):
         """
         Returns true if there the temperature is higher
@@ -136,17 +134,11 @@ class Temp(Singleton):
             self.led_onboard.blink(num=2)
             return True
         return False
-                   
-
     def _get_temperature(self):
         self.ds.convert_temp()
         # Warten: min. 750 ms
         time.sleep_ms(800)
         return self.ds.read_temp(self.rom)
-
-
-
- 
 class Pumpe(Singleton):
     holiday = False
     pumpe_laeuft = False
@@ -161,7 +153,7 @@ class Pumpe(Singleton):
         self.rgb_led.set(RGB_led.off)
         self.last_scheduled_run_ms = time.ticks_ms()
         self.last_temp_rising = time.ticks_ms()
-
+        self.outside_waiting_time = True
     def laeuft(self, pumpe_soll_laufen):
         """
         What shall the pump do?
@@ -178,13 +170,17 @@ class Pumpe(Singleton):
         now_ms = time.ticks_ms()
         if self.timer_lastpumpenstart + waiting_time_ms < now_ms:
             self.rgb_led.set(RGB_led.off)
-            outside_waiting_time= True
+            if not self.outside_waiting_time:
+                info("Now outside waiting time")
+            self.outside_waiting_time= True
         else:
             self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
-            outside_waiting_time = False
+            if self.outside_waiting_time:
+                info("Now in waiting time")
+            self.outside_waiting_time = False
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
-            if outside_waiting_time: # Pump will only run outside wating_time 
+            if self.outside_waiting_time: # Pump will only run outside wating_time
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{timetable.pt()}: Pump on")
@@ -194,6 +190,7 @@ class Pumpe(Singleton):
                 # real warm water request within waiting time
                 # i.e. inside wating time, but after quiet_time
                 # return True to indicate that timetable sould be updated
+                info("Real warm water request detected")
                 self.timer_lastpumpenstart = now_ms
                 return True
         elif (pumpe_soll_laufen == False and \
@@ -204,7 +201,6 @@ class Pumpe(Singleton):
             self.pumpenpin.on()
             info(f"{timetable.pt()}: Pump off")
         return False # request False or trigger ignored
-
     def tick(self, args=None):
         """
         Periodic task
@@ -216,18 +212,22 @@ class Pumpe(Singleton):
             # Is the reason a scheduled run?
             if self.last_scheduled_run_ms + 2 * RUNNING_TIME * 1000 < now_ms:
                 # Real demand
+                if self.holiday:
+                    info("Holiday off")
                 self.holiday = False
-                self.rgb_led.set(RGB_led.off)
                 self.last_temp_rising = now_ms
-            elif (self.last_temp_rising + 24 * 60 * 60 * 1000 < now_ms):
-                # Last request for hot water more than 24h ago
-                self.holiday = True
-                self.rgb_led.set(RGB_led.yellow)
-            if (self.laeuft(True) == True):       # if within 5s the temp > = 0.12°C, request pump on
+            if (self.laeuft(True) == True):    # if within 5s the temp > = 0.12°C, request pump on
                 self.ttable.check_item()       # Mark this in the timetable, except when within 1/6th of waiting time
-        else:
-            self.laeuft(False)                    # request pump off
-    
+            return
+        elif self.last_temp_rising + HOLIDAY_TIME * 1000 < now_ms:
+                # Last request for hot water more than 24h ago
+                if not self.holiday: # Do not repeat info
+                    info("Entering holiday mode")
+                self.holiday = True
+                status = self.rgb_led.status
+                self.rgb_led.blink(RGB_led.yellow)
+                self.rgb_led.set(status)
+        self.laeuft(False)                    # request pump off
     def scheduled_run(self, args=None):
         """
         Starte pumpe gemäß timetable
@@ -235,22 +235,23 @@ class Pumpe(Singleton):
         self.last_scheduled_run_ms = time.ticks_ms()
         if self.holiday:
             # If on holiday skip scheduled runs
+            info("Holiday: skipping scheduled run")
             return
+        info("Scheduled run")
         # Decrease the counter in the timetable
         self.ttable.check_item(t=my_time(), increase=False)
         self.laeuft(True)
-         
-   
     def desinfect(self, args=None): # Start pump (every 72h) if no timetable exists
         if (len(self.ttable.timetable) < 1 or self.holiday):
             # Treat this as a scheduled run
             self.last_scheduled_run_ms = time.ticks_ms()
             # No entry in timetable
+            info("Desinfect run")
             self.laeuft(True) # Start pump
         self.led_onboard.blink(num=4)
         # Backup timetable
+        info("Backup timetable")
         self.ttable.write_todisk()
-
 class Backup():
     timestamp_ms = 0
     def __init__(self, pumpe, stream):
@@ -259,10 +260,8 @@ class Backup():
         button.irq(trigger=Pin.IRQ_FALLING, handler=self._cb1)
         self.pumpe = pumpe
         self.stream = stream
-        
     def _cb1(self, p = None):
         micropython.schedule(self.do_backup_ref, p)
-        
     def do_backup(self, p = None):
         """
         Trigger a backup when USR Button is pressed
@@ -277,7 +276,7 @@ class Backup():
             if self.pumpe.ttable.write_todisk():
                 info("Timetable stored on disk")
                 RGB_led().blink(RGB_led.green)
-            # TO DO Store stream
+            # Store stream
             if self.stream != sys.stdout:
                 # Assume it is a StringIO
                 msgs = stream.getvalue()
@@ -287,19 +286,13 @@ class Backup():
                         debug(f"{o} Bytes written to {LOG_FILENAME}")
                         RGB_led().blink(RGB_led.green, num=2)
             self.timestamp_ms = now_ms
-            
-# TO DO
-# Handle holidays -> If no temp_rising within 24h -> holiday modus -> do not schedule next alarm
-
 # Logger
 stream = sys.stdout
 #stream = io.StringIO()
-#ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
 ulogging.basicConfig(stream=stream) # INFO
-
+#ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
 pumpe=Pumpe()
 ttable = timetable.Timetable()
-
 # Prepare for backup via USR button
 backup = Backup(pumpe, stream)
 # Start processes
