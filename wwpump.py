@@ -22,7 +22,7 @@ from machine import Timer
 from machine import Pin
 from led import Led, RGB_led, Singleton
 from ulogging import info, debug
-from my_time import my_time
+from My_time import my_time
 # DS18B20
 DS18B20_PIN = 22
 DS18B20_INDEX = 0 # Only one sensor

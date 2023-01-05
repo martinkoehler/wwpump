@@ -19,7 +19,7 @@ SLOT_TIME = 15 # (in min) slots are 15 minutes (Slots must divide the hour!)
 TIMETABLE_FILENAME = "timetable"
 from ulogging import info, debug
 import time
-from my_time import my_time
+from My_time import my_time
 # Helper functions
 # ======================================
 def pt(t = None):
