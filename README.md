@@ -5,7 +5,7 @@ This follows the ideas from https://www.heise.de/select/make/2022/4/221660845420
 
 For more information please refer to the Make article or https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung
 
-For a simulation see https://wokwi.com/projects/352775525353201665
+For a simulation see https://wokwi.com/projects/353105419471095809
 
 As material I used:
 * DS18B20 temperatur sensor (in plastic case)
