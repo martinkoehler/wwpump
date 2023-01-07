@@ -16,9 +16,10 @@
 #
 from machine import Pin
 from neopixel import NeoPixel # We have a ws2812rgb LED
-from time import sleep
+from time import sleep_ms
 from ulogging import info, debug
-# RGB Led
+import timetable
+# GPIO-Pin für WS2812 RGB Led
 PIN_NP = 23
 LEDS = 1
 BRIGHTNESS = 10
@@ -29,10 +30,6 @@ class Singleton(object):
       cls.instance = super(Singleton, cls).__new__(cls)
     return cls.instance
 class RGB_led(Singleton):
-    # GPIO-Pin für WS2812
-    pin_np = PIN_NP
-    # Anzahl der LEDs
-    leds = LEDS
     # Helligkeit: 0 bis 255
     brightness = BRIGHTNESS
     white = (brightness, brightness, brightness)
@@ -43,44 +40,72 @@ class RGB_led(Singleton):
     pink = (brightness, 0, brightness)
     turquoise = (0, brightness, brightness)
     off = (0, 0, 0)
-    np = NeoPixel(Pin(pin_np, Pin.OUT), leds)
-    def __init__(self):
-        self.status = RGB_led.off
-        self.np[0] = self.status
+    def __init__(self, leds=LEDS):
+        self.status = []
+        self.leds = leds
+        self.np = NeoPixel(Pin(PIN_NP, Pin.OUT), leds)
+        for i in range(leds):
+            self.status.append(RGB_led.off)
+            self.np[i] = self.status[i]
         self.np.write()
-    def set(self,color):
-        if self.status != color:
-            info(f"RGB_Led: Set {color}")
-        self.np[0] = color
+
+    def set(self,color, led = 0):
+        """
+        Set the color of one led (default index = 0)
+        """
+        if self.status[led] != color:
+            info(f"{timetable.pt()}: RGB_Led: Set {led} to {color}")
+        self.np[led] = color
         self.np.write()
-        self.status = color
+        self.status[led] = color
+
     def blink(self, color, ms=50, num=1):
-        debug(f"RGB_Led: Binking {num} for {ms}ms with color {color}")
-        for i in range(0,num):
-            self.np[0] = color
+        """
+        Blink all LEDs with color. Ensure that we set the LEDs off before and after and 
+        restore their previous color at the end
+        """
+        debug(f"{timetable.pt()}: RGB_Led: Binking {num} for {ms}ms with color {color}")
+        for i in range(num):
+            # Set Leds off, but keep status
+            for j in range(self.leds):
+                self.status[j] = self.np[j]
+                self.np[j] = self.off
             self.np.write()
-            sleep(ms/1000)
-            self.np[0] = self.off
+            sleep_ms(ms)
+            # Set color
+            for j in range(self.leds):
+                self.np[j] = color
             self.np.write()
-            sleep(ms/1000)
-        self.np[0] = self.status
-        self.np.write()
+            sleep_ms(ms)
+            # Set Leds off again
+            for j in range(self.leds):
+                self.np[j] = self.off
+            self.np.write()
+            sleep_ms(ms)
+            # Restore status
+            for j in range(self.leds):
+                self.np[j] = self.status[j]
+            self.np.write()
+
 class Led(Singleton):
     def __init__(self):
         # Initialisierung von GPIO25 als Ausgang
         self.led_onboard = Pin(25, Pin.OUT)
         self.led_onboard.off()
         self.status = 0
+
     def on(self):
         self.led_onboard.on()
         self.status = 1
+
     def off(self):
         self.led_onboard.off()
         self.status = 0
+
     def blink(self, ms=50, num=1):
-        for i in range(0,num):
+        for i in range(num):
             self.led_onboard.on()
-            sleep(ms/1000)
+            sleep_ms(ms)
             self.led_onboard.off()
-            sleep(ms/1000)
+            sleep_ms(ms)
         self.led_onboard.value(self.status)

@@ -5,7 +5,7 @@ This follows the ideas from https://www.heise.de/select/make/2022/4/221660845420
 
 For more information please refer to the Make article or https://github.com/MakeMagazinDE/Zirkulationspumpensteuerung
 
-For a simulation see https://wokwi.com/projects/353105419471095809
+For a simulation see https://wokwi.com/projects/353184806007066625
 
 As material I used:
 * DS18B20 temperatur sensor (in plastic case)
@@ -18,7 +18,7 @@ Main differences are:
 * I implemented a mechanism that remembers whenever warm water was needed and adds a corresponding slot, so that in a week 
 the pump starts some minutes earlier automatically in order to provide warm water. 
 If a slot is not used for some time it gets deleted automatically.
-* The desinfection logic is not implemented, since I observered that in reality there is always a slot active that starts the pump.
+* The desinfection logic is implemented, too, although I observered that in reality there is always a slot active that starts the pump. It is now mainly used to initialize the scheduled runs and to backup the timetable
 
 I furthermore used an electronic relais connected to PIN 20 to drive the pump. The VCC of the relais is conneced to VBUS, since it needs 5V to work.
 The DS18B20 is connected to pin 22 and a 4,7kOhm resistor connects the bus signal to 3.3V out of the RP2040.

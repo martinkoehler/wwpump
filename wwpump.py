@@ -33,6 +33,7 @@ TICK_TIME = 1000 # Main routine
 # All thess times are in s
 WAITING_TIME = 15*60 # Pump should only run every 15 minutes
 RUNNING_TIME = 40 # Pump runs for 40 seconds
+QUIET_TIME = RUNNING_TIME + 20 # Rising temperatgure will be ignored in QUIET_TIME
 HOLIDAY_TIME = 24 * 60 * 60 # Holiday mode if no request for 24h
 DESINFECT_TIME = 3*24*60*60 # Run pump at least every 3 days & do Backup
 # USR Button
@@ -55,13 +56,15 @@ class Alarm_timer(Singleton):
         alrm = ttable.next_alarm() # This is in seconds
         self.timer3.deinit() # Just to be on the safe side
         if alrm == False:
-            info("No next alarm scheduled")
+            info(f"{timetable.pt()}: No next alarm scheduled")
             self.timer3_time = False
             return
-        # Start one minute earlier
-        if alrm > 60:
+        # Start QUIT_TIME seconds earlier to ensure that a periodic request near a slot boundary is handled 
+        # correctly. If request is always at 8:15:01, the pump is started so that the next request at 8:15:01 
+        # is recognized as a Warm water request, which means it must be after the QUIET_TIME
+        if alrm > QUIET_TIME:
             # Ensure that alrm remains > 0
-            alrm -= 60
+            alrm -= QUIET_TIME
         self.timer3 = Timer(period=alrm*1000, mode=Timer.ONE_SHOT, callback=self._cb3) # need ms here
         self.timer3_time = my_time()+alrm # Store this in the class
         info(f"{timetable.pt()}: Next scheduled_run at: {timetable.pt(self.timer3_time)}")
@@ -92,6 +95,7 @@ class Alarm_timer(Singleton):
         micropython.schedule(self.pumpe_desinfect_ref, tim)
     def _cb3(self, tim):
         micropython.schedule(self.pumpe_scheduled_run_ref, tim)
+
 class Temp(Singleton):
     """
     Temperature class:
@@ -105,7 +109,7 @@ class Temp(Singleton):
             self.ds = ds18x20.DS18X20(ow)
             self.rom = self.ds.scan()[DS18B20_INDEX] # Only one sensor
         except IndexError: # No sensor found
-            info("No DS18B20 sensor found. Will use mock up")
+            info(f"{timetable.pt()}: No DS18B20 sensor found. Will use mock up")
             self.rom = False
             class ds():
                 temp = 22.0
@@ -139,6 +143,7 @@ class Temp(Singleton):
         # Warten: min. 750 ms
         time.sleep_ms(800)
         return self.ds.read_temp(self.rom)
+
 class Pumpe(Singleton):
     holiday = False
     pumpe_laeuft = False
@@ -149,85 +154,92 @@ class Pumpe(Singleton):
         self.led_onboard = Led()
         self.pumpenpin = Pin(PUMPEN_PIN, Pin.OUT)
         self.pumpenpin.on() # Low -> Pumpe ein
+        self.now_ms = time.ticks_ms()
         self.timer_lastpumpenstart = - WAITING_TIME * 1000
         self.rgb_led.set(RGB_led.off)
-        self.last_scheduled_run_ms = time.ticks_ms()
-        self.last_temp_rising = time.ticks_ms()
+        self.last_scheduled_run_ms = - (WAITING_TIME + QUIET_TIME) * 1000
+        self.last_temp_rising = - QUIET_TIME * 1000
         self.outside_waiting_time = True
+        self.outside_quiet_time= True
+
     def laeuft(self, pumpe_soll_laufen):
         """
         What shall the pump do?
-        If it should run (True) than we check whether this request was given outside the waiting time, in which case
-        the pump will start and we return true.
-        If we are within the first 1/6 th of the waiting time, we return false
-        If within the waiting time but outside first 1/6, we do not start the pump, but return true
-        If we the pump should not run (False), we check whether the running time has elaped and stop the pump
-        in that case. We always return False.
+        If it should run (True) than we check whether this request was given outside the waiting time,
+        in which case the pump will start and we return true.
+        If we the pump should not run (False), we check whether the running time has elaped
+        and stop the pump in that case. We always return False.
         """
-        waiting_time_ms = WAITING_TIME * 1000   # Pump will only run again after WAITING_TIME seconds
-        quiet_time_ms = 2 * RUNNING_TIME * 1000 # a request will be ignored if it occurs within the quiet_time
-        running_time_ms = RUNNING_TIME * 1000   # Pump runs for RUNNING_TIME seconds
-        now_ms = time.ticks_ms()
-        if self.timer_lastpumpenstart + waiting_time_ms < now_ms:
-            self.rgb_led.set(RGB_led.off)
-            if not self.outside_waiting_time:
-                info("Now outside waiting time")
-            self.outside_waiting_time= True
-        else:
-            self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
-            if self.outside_waiting_time:
-                info("Now in waiting time")
-            self.outside_waiting_time = False
+        
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
             if self.outside_waiting_time: # Pump will only run outside wating_time
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{timetable.pt()}: Pump on")
-                self.timer_lastpumpenstart = now_ms
-                return True
-            elif self.timer_lastpumpenstart + quiet_time_ms < now_ms:
-                # real warm water request within waiting time
-                # i.e. inside wating time, but after quiet_time
-                # return True to indicate that timetable sould be updated
-                info("Real warm water request detected")
-                self.timer_lastpumpenstart = now_ms
-                return True
+                self.timer_lastpumpenstart = self.now_ms
+            else:
+                info(f"{timetable.pt()}: Request within waiting time. (pump stays 'off')")
+            return True
         elif (pumpe_soll_laufen == False and \
               self.pumpe_laeuft == True and \
-              (self.timer_lastpumpenstart + running_time_ms < now_ms)):
-            # Pump will run for running_time_ms (30s)
+              (self.timer_lastpumpenstart + RUNNING_TIME * 1000 < self.now_ms)):
+            # Pump will run for RUNNING_TIME * 1000 ms
             self.pumpe_laeuft = False
             self.pumpenpin.on()
             info(f"{timetable.pt()}: Pump off")
         return False # request False or trigger ignored
+
     def tick(self, args=None):
         """
         Periodic task
         läuft jede Sekunde
         """
-        self.led_onboard.blink(ms=10) # Heartbeat
-        now_ms = time.ticks_ms()
-        if self.temp.rising():
-            # Is the reason a scheduled run?
-            if self.last_scheduled_run_ms + 2 * RUNNING_TIME * 1000 < now_ms:
+        self.now_ms = time.ticks_ms()
+        # Set current status (waiting and quiet time)
+        if self.timer_lastpumpenstart + WAITING_TIME * 1000 < self.now_ms:
+            self.rgb_led.set(RGB_led.off)
+            if not self.outside_waiting_time:
+                info(f"{timetable.pt()}: Now outside waiting time")
+            self.outside_waiting_time= True
+        else:
+            self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
+            if self.outside_waiting_time:
+                info(f"{timetable.pt()}: Now in waiting time")
+            self.outside_waiting_time = False
+
+        if self.last_temp_rising + QUIET_TIME * 1000 < self.now_ms:
+            if not self.outside_quiet_time:
+                info(f"{timetable.pt()}: Now outside quiet time")
+            self.outside_quiet_time= True
+        else:
+            if self.outside_quiet_time:
+                info(f"{timetable.pt()}: Now in quite time")
+            self.outside_quiet_time = False
+            self.rgb_led.blink(RGB_led.red) # Indicate quiet time
+        is_temp_rising = self.temp.rising()
+        if is_temp_rising:
+            if self.outside_quiet_time:
                 # Real demand
+                info(f"{timetable.pt()}: Warm water request detected")
                 if self.holiday:
-                    info("Holiday off")
+                    info(f"{timetable.pt()}: Holiday off")
                 self.holiday = False
-                self.last_temp_rising = now_ms
-            if (self.laeuft(True) == True):    # if within 5s the temp > = 0.12°C, request pump on
-                self.ttable.check_item()       # Mark this in the timetable, except when within 1/6th of waiting time
+                # Request pump on
+                # Pump stays off during waiting time!
+                self.laeuft(True)
+                self.ttable.check_item()  # Mark this in the timetable
+            self.last_temp_rising = self.now_ms
             return
-        elif self.last_temp_rising + HOLIDAY_TIME * 1000 < now_ms:
+        elif self.last_temp_rising + HOLIDAY_TIME * 1000 < self.now_ms:
                 # Last request for hot water more than 24h ago
                 if not self.holiday: # Do not repeat info
-                    info("Entering holiday mode")
+                    info(f"{timetable.pt()}: Entering holiday mode")
                 self.holiday = True
-                status = self.rgb_led.status
                 self.rgb_led.blink(RGB_led.yellow)
-                self.rgb_led.set(status)
         self.laeuft(False)                    # request pump off
+        self.led_onboard.blink(ms=10) # Heartbeat (Should run at the end)
+
     def scheduled_run(self, args=None):
         """
         Starte pumpe gemäß timetable
@@ -235,22 +247,27 @@ class Pumpe(Singleton):
         self.last_scheduled_run_ms = time.ticks_ms()
         if self.holiday:
             # If on holiday skip scheduled runs
-            info("Holiday: skipping scheduled run")
+            info(f"{timetable.pt()}: Holiday: skipping scheduled run")
             return
-        info("Scheduled run")
+        info(f"{timetable.pt()}: Scheduled run")
         # Decrease the counter in the timetable
-        self.ttable.check_item(t=my_time(), increase=False)
+        slot_buffer = 2 # Security buffer (s) to ensure we are inside the right slot (not at the border)
+        self.ttable.check_item(t=my_time() + QUIET_TIME + slot_buffer, increase=False)
         self.laeuft(True)
     def desinfect(self, args=None): # Start pump (every 72h) if no timetable exists
+        """
+        Start pump for desinfection during holiday and initialize next scheduled 
+        run after e.g. timetable was empty
+        """
         if (len(self.ttable.timetable) < 1 or self.holiday):
             # Treat this as a scheduled run
             self.last_scheduled_run_ms = time.ticks_ms()
             # No entry in timetable
-            info("Desinfect run")
+            info(f"{timetable.pt()}: Desinfect run")
             self.laeuft(True) # Start pump
         self.led_onboard.blink(num=4)
         # Backup timetable
-        info("Backup timetable")
+        info(f"{timetable.pt()}: Backup timetable")
         self.ttable.write_todisk()
 class Backup():
     timestamp_ms = 0
@@ -269,12 +286,12 @@ class Backup():
         now_ms = time.ticks_ms()
         if now_ms - self.timestamp_ms < 2000:
             pass
-            #debug (f"{timetable.pt()}: Ignoring")
+            debug (f"{timetable.pt()}: Ignoring")
         else:
             info(f"{timetable.pt()}: Backup Button pressed: {p}")
             RGB_led().blink(RGB_led.white)
             if self.pumpe.ttable.write_todisk():
-                info("Timetable stored on disk")
+                info(f"{timetable.pt()}: Timetable stored on disk")
                 RGB_led().blink(RGB_led.green)
             # Store stream
             if self.stream != sys.stdout:
