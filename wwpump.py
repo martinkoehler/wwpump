@@ -40,11 +40,11 @@ DESINFECT_TIME = 3*24*60*60 # Run pump at least every 3 days & do Backup
 USR_PIN = 13
 # Backup
 LOG_FILENAME = "wwpumpe.log"
-class Alarm_timer(Singleton):
+class Alarm_timer():
     timer3 = Timer()
-    def __init__(self):
-        self.pumpe=Pumpe()
-        self.ttable = timetable.Timetable()
+    def __init__(self, pumpe):
+        self.pumpe=pumpe
+        self.ttable = self.pumpe.ttable
         self.pumpe_tick_ref=pumpe.tick
         self.pumpe_desinfect_ref=self.pumpe_desinfect
         self.pumpe_scheduled_run_ref = self.pumpe_scheduled_run
@@ -146,7 +146,7 @@ class Temp(Singleton):
         time.sleep_ms(800)
         return self.ds.read_temp(self.rom)
 
-class Pumpe(Singleton):
+class Pumpe():
     holiday = False
     pumpe_laeuft = False
     def __init__(self):
@@ -338,8 +338,7 @@ stream = sys.stdout
 ulogging.basicConfig(stream=stream) # INFO
 #ulogging.basicConfig(level=ulogging.DEBUG,stream=stream)
 pumpe=Pumpe()
-ttable = timetable.Timetable()
 # Prepare for backup via USR button
 backup = Backup(pumpe, stream)
 # Start processes
-alarm_timer = Alarm_timer()
+alarm_timer = Alarm_timer(pumpe)
