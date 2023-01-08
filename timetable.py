@@ -50,7 +50,8 @@ class Timetable():
             t = my_time()
         index = self._in_timetable(t)
         if index == None:
-            self._add_slot(t)
+            if increase: # Do not add a slot if increase == False e.g. scheduled_run
+                self._add_slot(t)
             return
         # Already in the table or no new slot -> handle counter (wday,h,m,s,cnt]
         if increase:

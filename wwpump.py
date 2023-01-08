@@ -122,6 +122,7 @@ class Temp(Singleton):
             self.ds = ds()
         temp_now = self._get_temperature()
         self.t = [temp_now] * 5 # Initialize history
+
     def rising(self):
         """
         Returns true if there the temperature is higher
@@ -138,6 +139,7 @@ class Temp(Singleton):
             self.led_onboard.blink(num=2)
             return True
         return False
+
     def _get_temperature(self):
         self.ds.convert_temp()
         # Warten: min. 750 ms
@@ -161,7 +163,7 @@ class Pumpe(Singleton):
         self.last_warm_water_demand = - QUIET_TIME * 1000
         self.outside_waiting_time = True
         self.outside_quiet_time= True
-        self.outside_schedluled_run = True
+        self.outside_scheduled_run = True
 
     def laeuft(self, pumpe_soll_laufen):
         """
@@ -171,7 +173,6 @@ class Pumpe(Singleton):
         If we the pump should not run (False), we check whether the running time has elaped
         and stop the pump in that case. We always return False.
         """
-
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
             if self.outside_waiting_time: # Pump will only run outside wating_time
@@ -198,15 +199,16 @@ class Pumpe(Singleton):
         self.now_ms = time.ticks_ms()
         # Set current status (waiting and quiet time)
         if self.timer_lastpumpenstart + WAITING_TIME * 1000 < self.now_ms:
-            self.rgb_led.set(RGB_led.off)
             if not self.outside_waiting_time:
                 info(f"{timetable.pt()}: Now outside waiting time")
             self.outside_waiting_time= True
+            self.rgb_led.set(RGB_led.off)
         else:
-            self.rgb_led.set(RGB_led.red) # indicate that pump can not be triggered in waiting time
+            # indicate that pump can not be triggered in waiting time
             if self.outside_waiting_time:
                 info(f"{timetable.pt()}: Now in waiting time")
             self.outside_waiting_time = False
+            self.rgb_led.set(RGB_led.red) 
 
         if self.last_warm_water_demand + QUIET_TIME * 1000 < self.now_ms:
             if not self.outside_quiet_time:
@@ -230,13 +232,13 @@ class Pumpe(Singleton):
             self.holiday = False
 
         if self.last_scheduled_run_ms + QUIET_TIME * 1000 < self.now_ms:
-            self.outside_scheduled_run = True
-            if not self.outside_schedluled_run:
+            if not self.outside_scheduled_run:
                 info(f"{timetable.pt()}: Outside scheduled run")
+            self.outside_scheduled_run = True
         else:
-            if self.outside_schedluled_run:
+            if self.outside_scheduled_run:
                 info(f"{timetable.pt()}: Scheduled run")
-            self.outside_schedluled_run = False
+            self.outside_scheduled_run = False
 
     def warm_water_demand(self):
         if self.temp.rising() \
@@ -295,6 +297,7 @@ class Pumpe(Singleton):
         # Backup timetable
         info(f"{timetable.pt()}: Backup timetable")
         self.ttable.write_todisk()
+
 class Backup():
     timestamp_ms = 0
     def __init__(self, pumpe, stream):
