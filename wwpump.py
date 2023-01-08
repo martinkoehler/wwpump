@@ -318,10 +318,10 @@ class Backup():
             debug (f"{timetable.pt()}: Ignoring")
         else:
             info(f"{timetable.pt()}: Backup Button pressed: {p}")
-            RGB_led().blink(RGB_led.white)
+            self.pumpe.rgb_led.blink(RGB_led.white)
             if self.pumpe.ttable.write_todisk():
                 info(f"{timetable.pt()}: Timetable stored on disk")
-                RGB_led().blink(RGB_led.green)
+                self.pumpe.rgb_led.blink(RGB_led.green)
             # Store stream
             if self.stream != sys.stdout:
                 # Assume it is a StringIO
@@ -330,7 +330,7 @@ class Backup():
                     with open(LOG_FILENAME,"a") as f:
                         o=f.write(msgs)
                         debug(f"{o} Bytes written to {LOG_FILENAME}")
-                        RGB_led().blink(RGB_led.green, num=2)
+                        self.pumpe.rgb_led.blink(RGB_led.green, num=2)
             self.timestamp_ms = now_ms
 # Logger
 stream = sys.stdout
