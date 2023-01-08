@@ -158,9 +158,10 @@ class Pumpe(Singleton):
         self.timer_lastpumpenstart = - WAITING_TIME * 1000
         self.rgb_led.set(RGB_led.off)
         self.last_scheduled_run_ms = - (WAITING_TIME + QUIET_TIME) * 1000
-        self.last_temp_rising = - QUIET_TIME * 1000
+        self.last_warm_water_demand = - QUIET_TIME * 1000
         self.outside_waiting_time = True
         self.outside_quiet_time= True
+        self.outside_schedluled_run = True
 
     def laeuft(self, pumpe_soll_laufen):
         """
@@ -170,7 +171,7 @@ class Pumpe(Singleton):
         If we the pump should not run (False), we check whether the running time has elaped
         and stop the pump in that case. We always return False.
         """
-        
+
         if (pumpe_soll_laufen == True and \
                 self.pumpe_laeuft == False):
             if self.outside_waiting_time: # Pump will only run outside wating_time
@@ -190,10 +191,9 @@ class Pumpe(Singleton):
             info(f"{timetable.pt()}: Pump off")
         return False # request False or trigger ignored
 
-    def tick(self, args=None):
+    def update_state(self):
         """
-        Periodic task
-        läuft jede Sekunde
+        Updates internal state variables
         """
         self.now_ms = time.ticks_ms()
         # Set current status (waiting and quiet time)
@@ -208,7 +208,7 @@ class Pumpe(Singleton):
                 info(f"{timetable.pt()}: Now in waiting time")
             self.outside_waiting_time = False
 
-        if self.last_temp_rising + QUIET_TIME * 1000 < self.now_ms:
+        if self.last_warm_water_demand + QUIET_TIME * 1000 < self.now_ms:
             if not self.outside_quiet_time:
                 info(f"{timetable.pt()}: Now outside quiet time")
             self.outside_quiet_time= True
@@ -217,34 +217,58 @@ class Pumpe(Singleton):
                 info(f"{timetable.pt()}: Now in quite time")
             self.outside_quiet_time = False
             self.rgb_led.blink(RGB_led.red) # Indicate quiet time
-        is_temp_rising = self.temp.rising()
-        if is_temp_rising:
-            if self.outside_quiet_time:
-                # Real demand
-                info(f"{timetable.pt()}: Warm water request detected")
-                if self.holiday:
-                    info(f"{timetable.pt()}: Holiday off")
-                self.holiday = False
-                # Request pump on
-                # Pump stays off during waiting time!
-                self.laeuft(True)
-                self.ttable.check_item()  # Mark this in the timetable
-            self.last_temp_rising = self.now_ms
-            return
-        elif self.last_temp_rising + HOLIDAY_TIME * 1000 < self.now_ms:
-                # Last request for hot water more than 24h ago
-                if not self.holiday: # Do not repeat info
-                    info(f"{timetable.pt()}: Entering holiday mode")
-                self.holiday = True
-                self.rgb_led.blink(RGB_led.yellow)
-        self.laeuft(False)                    # request pump off
+
+        if self.last_warm_water_demand + HOLIDAY_TIME * 1000 < self.now_ms:
+            # Last request for hot water more than 24h ago
+            if not self.holiday: # Do not repeat info
+                info(f"{timetable.pt()}: Entering holiday mode")
+            self.holiday = True
+            self.rgb_led.blink(RGB_led.yellow)
+        else:
+            if self.holiday:
+                info(f"{timetable.pt()}: Leaving holiday mode")
+            self.holiday = False
+
+        if self.last_scheduled_run_ms + QUIET_TIME * 1000 < self.now_ms:
+            self.outside_scheduled_run = True
+            if not self.outside_schedluled_run:
+                info(f"{timetable.pt()}: Outside scheduled run")
+        else:
+            if self.outside_schedluled_run:
+                info(f"{timetable.pt()}: Scheduled run")
+            self.outside_schedluled_run = False
+
+    def warm_water_demand(self):
+        if self.temp.rising() \
+            and self.outside_quiet_time \
+            and self.outside_scheduled_run:
+            # Real demand
+            self.last_warm_water_demand = self.now_ms
+            return True
+        return False
+
+    def tick(self, args=None):
+        """
+        Periodic task
+        läuft jede Sekunde
+        """
+        self.update_state()
+        if self.warm_water_demand():
+            info(f"{timetable.pt()}: Warm water request detected")
+            # Request pump on
+            # Pump stays off during waiting time!
+            self.laeuft(True)
+            self.ttable.check_item()  # Mark this in the timetable
+        else:
+            self.laeuft(False)                    # request pump off
         self.led_onboard.blink(ms=10) # Heartbeat (Should run at the end)
 
     def scheduled_run(self, args=None):
         """
         Starte pumpe gemäß timetable
         """
-        self.last_scheduled_run_ms = time.ticks_ms()
+        self.last_scheduled_run_ms = time.ticks_ms() # Can not use self.now_ms here
+        self.update_state() # Needs valod self.last_scheduled_run_ms
         if self.holiday:
             # If on holiday skip scheduled runs
             info(f"{timetable.pt()}: Holiday: skipping scheduled run")
@@ -254,6 +278,7 @@ class Pumpe(Singleton):
         slot_buffer = 2 # Security buffer (s) to ensure we are inside the right slot (not at the border)
         self.ttable.check_item(t=my_time() + QUIET_TIME + slot_buffer, increase=False)
         self.laeuft(True)
+
     def desinfect(self, args=None): # Start pump (every 72h) if no timetable exists
         """
         Start pump for desinfection during holiday and initialize next scheduled 
@@ -262,6 +287,7 @@ class Pumpe(Singleton):
         if (len(self.ttable.timetable) < 1 or self.holiday):
             # Treat this as a scheduled run
             self.last_scheduled_run_ms = time.ticks_ms()
+            self.update_state()
             # No entry in timetable
             info(f"{timetable.pt()}: Desinfect run")
             self.laeuft(True) # Start pump
