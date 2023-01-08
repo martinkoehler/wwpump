@@ -157,10 +157,10 @@ class Pumpe(Singleton):
         self.pumpenpin = Pin(PUMPEN_PIN, Pin.OUT)
         self.pumpenpin.on() # Low -> Pumpe ein
         self.now_ms = time.ticks_ms()
-        self.timer_lastpumpenstart = - WAITING_TIME * 1000
+        self.timer_lastpumpenstart = self.now_ms - WAITING_TIME * 1000
         self.rgb_led.set(RGB_led.off)
-        self.last_scheduled_run_ms = - (WAITING_TIME + QUIET_TIME) * 1000
-        self.last_warm_water_demand = - QUIET_TIME * 1000
+        self.last_scheduled_run_ms = self.now_ms - (WAITING_TIME + QUIET_TIME) * 1000
+        self.last_warm_water_demand = self.now_ms - QUIET_TIME * 1000
         self.outside_waiting_time = True
         self.outside_quiet_time= True
         self.outside_scheduled_run = True
