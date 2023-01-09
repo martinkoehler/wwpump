@@ -156,11 +156,11 @@ class Pumpe():
         self.led_onboard = Led()
         self.pumpenpin = Pin(PUMPEN_PIN, Pin.OUT)
         self.pumpenpin.on() # Low -> Pumpe ein
-        self.now_ms = time.ticks_ms()
-        self.last_pumpenstart_ms = self.now_ms - WAITING_TIME * 1000
+        self.now = my_time()
+        self.last_pumpenstart = self.now - WAITING_TIME * 1000
         self.rgb_led.set(RGB_led.off)
-        self.last_scheduled_run_ms = self.now_ms - (WAITING_TIME + QUIET_TIME) * 1000
-        self.last_warm_water_demand_ms = self.now_ms - QUIET_TIME * 1000
+        self.last_scheduled_run = self.now - (WAITING_TIME + QUIET_TIME) * 1000
+        self.last_warm_water_demand = self.now - QUIET_TIME * 1000
         self.outside_waiting_time = True
         self.outside_quiet_time= True
         self.outside_scheduled_run = True
@@ -180,13 +180,13 @@ class Pumpe():
                 self.pumpe_laeuft = True
                 self.pumpenpin.off()
                 info(f"{timetable.pt()}: Pump on")
-                self.last_pumpenstart_ms = self.now_ms
+                self.last_pumpenstart = self.now
             else:
                 info(f"{timetable.pt()}: Request within waiting time. (pump stays 'off')")
             return True
         elif (pumpe_soll_laufen == False and \
               self.pumpe_laeuft == True and \
-              (self.last_pumpenstart_ms + RUNNING_TIME * 1000 < self.now_ms)):
+              (self.last_pumpenstart + RUNNING_TIME * 1000 < self.now)):
             # Pump will run for RUNNING_TIME * 1000 ms
             self.pumpe_laeuft = False
             self.pumpenpin.on()
@@ -197,23 +197,23 @@ class Pumpe():
         """
         Updates internal state variables
         """
-        self.now_ms = time.ticks_ms()
+        self.now = my_time()
         # Check sanity
         sanitycheck_failed = False 
-        if self.last_pumpenstart_ms > self.now_ms:
-            self.last_pumpenstart_ms = self.now_ms
+        if self.last_pumpenstart > self.now:
+            self.last_pumpenstart = self.now
             sanitycheck_failed = True
-        if self.last_warm_water_demand_ms > self.now_ms:
-            self.last_warm_water_demand_ms = self.now_ms
+        if self.last_warm_water_demand > self.now:
+            self.last_warm_water_demand = self.now
             sanitycheck_failed = True
-        if self.last_scheduled_run_ms > self.now_ms:
-            self.last_scheduled_run_ms = self.now_ms
+        if self.last_scheduled_run > self.now:
+            self.last_scheduled_run = self.now
             sanitycheck_failed = True
         if sanitycheck_failed:
-            self.sanity_failed = time.localtime()
+            self.sanity_failed = my_time()
 
         # Set current status (waiting, quiet time, ...)
-        if self.last_pumpenstart_ms + WAITING_TIME * 1000 < self.now_ms:
+        if self.last_pumpenstart + WAITING_TIME * 1000 < self.now:
             if not self.outside_waiting_time:
                 info(f"{timetable.pt()}: Now outside waiting time")
             self.outside_waiting_time= True
@@ -225,7 +225,7 @@ class Pumpe():
             self.outside_waiting_time = False
             self.rgb_led.set(RGB_led.red) 
 
-        if self.last_warm_water_demand_ms + QUIET_TIME * 1000 < self.now_ms:
+        if self.last_warm_water_demand + QUIET_TIME * 1000 < self.now:
             if not self.outside_quiet_time:
                 info(f"{timetable.pt()}: Now outside quiet time")
             self.outside_quiet_time= True
@@ -235,7 +235,7 @@ class Pumpe():
             self.outside_quiet_time = False
             self.rgb_led.blink(RGB_led.red) # Indicate quiet time
 
-        if self.last_warm_water_demand_ms + HOLIDAY_TIME * 1000 < self.now_ms:
+        if self.last_warm_water_demand + HOLIDAY_TIME * 1000 < self.now:
             # Last request for hot water more than 24h ago
             if not self.holiday: # Do not repeat info
                 info(f"{timetable.pt()}: Entering holiday mode")
@@ -246,7 +246,7 @@ class Pumpe():
                 info(f"{timetable.pt()}: Leaving holiday mode")
             self.holiday = False
 
-        if self.last_scheduled_run_ms + QUIET_TIME * 1000 < self.now_ms:
+        if self.last_scheduled_run + QUIET_TIME * 1000 < self.now:
             if not self.outside_scheduled_run:
                 info(f"{timetable.pt()}: Outside scheduled run")
             self.outside_scheduled_run = True
@@ -260,7 +260,7 @@ class Pumpe():
             and self.outside_quiet_time \
             and self.outside_scheduled_run:
             # Real demand
-            self.last_warm_water_demand_ms = self.now_ms
+            self.last_warm_water_demand = self.now
             return True
         return False
 
@@ -284,8 +284,8 @@ class Pumpe():
         """
         Starte pumpe gemäß timetable
         """
-        self.last_scheduled_run_ms = time.ticks_ms() # Can not use self.now_ms here
-        self.update_state() # Needs valod self.last_scheduled_run_ms
+        self.last_scheduled_run = my_time() # Can not use self.now here
+        self.update_state() # Needs valod self.last_scheduled_run
         if self.holiday:
             # If on holiday skip scheduled runs
             info(f"{timetable.pt()}: Holiday: skipping scheduled run")
@@ -303,7 +303,7 @@ class Pumpe():
         """
         if (len(self.ttable.timetable) < 1 or self.holiday):
             # Treat this as a scheduled run
-            self.last_scheduled_run_ms = time.ticks_ms()
+            self.last_scheduled_run = my_time()
             self.update_state()
             # No entry in timetable
             info(f"{timetable.pt()}: Desinfect run")
@@ -314,7 +314,7 @@ class Pumpe():
         self.ttable.write_todisk()
 
 class Backup():
-    timestamp_ms = 0
+    timestamp = 0
     def __init__(self, pumpe, stream):
         self.do_backup_ref = self.do_backup
         button = Pin(USR_PIN, Pin.IN)
@@ -327,8 +327,8 @@ class Backup():
         """
         Trigger a backup when USR Button is pressed
         """
-        now_ms = time.ticks_ms()
-        if now_ms - self.timestamp_ms < 2000:
+        now = my_time()
+        if now - self.timestamp < 2000:
             pass
             debug (f"{timetable.pt()}: Ignoring")
         else:
@@ -346,7 +346,7 @@ class Backup():
                         o=f.write(msgs)
                         debug(f"{o} Bytes written to {LOG_FILENAME}")
                         self.pumpe.rgb_led.blink(RGB_led.green, num=2)
-            self.timestamp_ms = now_ms
+            self.timestamp = now
 # Logger
 stream = sys.stdout
 #stream = io.StringIO()
