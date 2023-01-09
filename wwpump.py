@@ -157,10 +157,10 @@ class Pumpe():
         self.pumpenpin = Pin(PUMPEN_PIN, Pin.OUT)
         self.pumpenpin.on() # Low -> Pumpe ein
         self.now = my_time()
-        self.last_pumpenstart = self.now - WAITING_TIME * 1000
+        self.last_pumpenstart = self.now - WAITING_TIME
         self.rgb_led.set(RGB_led.off)
-        self.last_scheduled_run = self.now - (WAITING_TIME + QUIET_TIME) * 1000
-        self.last_warm_water_demand = self.now - QUIET_TIME * 1000
+        self.last_scheduled_run = self.now - (WAITING_TIME + QUIET_TIME)
+        self.last_warm_water_demand = self.now - QUIET_TIME
         self.outside_waiting_time = True
         self.outside_quiet_time= True
         self.outside_scheduled_run = True
@@ -186,8 +186,8 @@ class Pumpe():
             return True
         elif (pumpe_soll_laufen == False and \
               self.pumpe_laeuft == True and \
-              (self.last_pumpenstart + RUNNING_TIME * 1000 < self.now)):
-            # Pump will run for RUNNING_TIME * 1000 ms
+              (self.last_pumpenstart + RUNNING_TIME < self.now)):
+            # Pump will run for RUNNING_TIME  s
             self.pumpe_laeuft = False
             self.pumpenpin.on()
             info(f"{timetable.pt()}: Pump off")
@@ -213,7 +213,7 @@ class Pumpe():
             self.sanity_failed = my_time()
 
         # Set current status (waiting, quiet time, ...)
-        if self.last_pumpenstart + WAITING_TIME * 1000 < self.now:
+        if self.last_pumpenstart + WAITING_TIME < self.now:
             if not self.outside_waiting_time:
                 info(f"{timetable.pt()}: Now outside waiting time")
             self.outside_waiting_time= True
@@ -225,7 +225,7 @@ class Pumpe():
             self.outside_waiting_time = False
             self.rgb_led.set(RGB_led.red) 
 
-        if self.last_warm_water_demand + QUIET_TIME * 1000 < self.now:
+        if self.last_warm_water_demand + QUIET_TIME < self.now:
             if not self.outside_quiet_time:
                 info(f"{timetable.pt()}: Now outside quiet time")
             self.outside_quiet_time= True
@@ -235,7 +235,7 @@ class Pumpe():
             self.outside_quiet_time = False
             self.rgb_led.blink(RGB_led.red) # Indicate quiet time
 
-        if self.last_warm_water_demand + HOLIDAY_TIME * 1000 < self.now:
+        if self.last_warm_water_demand + HOLIDAY_TIME < self.now:
             # Last request for hot water more than 24h ago
             if not self.holiday: # Do not repeat info
                 info(f"{timetable.pt()}: Entering holiday mode")
@@ -246,7 +246,7 @@ class Pumpe():
                 info(f"{timetable.pt()}: Leaving holiday mode")
             self.holiday = False
 
-        if self.last_scheduled_run + QUIET_TIME * 1000 < self.now:
+        if self.last_scheduled_run + QUIET_TIME < self.now:
             if not self.outside_scheduled_run:
                 info(f"{timetable.pt()}: Outside scheduled run")
             self.outside_scheduled_run = True
