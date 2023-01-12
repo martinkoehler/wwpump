@@ -134,7 +134,7 @@ class Temp(Singleton):
         cnt_alt  = (self.cnt + 2) % 5 # 5 measuremenzs earlier
         temperatur_delta = self.t[self.cnt]-self.t[cnt_alt]; # Temperaturdifferenz der letzten
                                                              # 5 Messzyklen bzw. Sekunden
-        if (temperatur_delta >= 0.12): # 0.12°
+        if (temperatur_delta >= 0.25): # 0.16°
             info(f"{timetable.pt()}: Rising temperature: {temperature}")
             self.led_onboard.blink(num=2)
             return True
