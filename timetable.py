@@ -105,6 +105,9 @@ class Timetable():
         except OSError:
             debug(f"{pt()}: No file {name} found.")
             return False
+        except SyntaxError:
+            debug(f"{pt()}: SyntaxError in {name}. Ignoring")
+            return False
         return True
     def _add_slot(self, t):
         """
